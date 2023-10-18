@@ -414,6 +414,7 @@ sub _prepare_request_data {
     my $msg_type = $req_storage->{msg_type} ||= $req_storage->{method};
 
     my $params       = $self->make_call_params($c, $req_storage);
+    $params->{'logger_context'} = $req_storage->{logger}->get_context() if $req_storage->{logger};
     my $stash_params = $req_storage->{stash_params};
 
     my $request_data = [
