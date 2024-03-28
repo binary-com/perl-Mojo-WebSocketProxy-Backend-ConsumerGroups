@@ -20,3 +20,5 @@ nytprof.out
 *.o
 *.bs
 *.swp
+.idea
+.DS_Store

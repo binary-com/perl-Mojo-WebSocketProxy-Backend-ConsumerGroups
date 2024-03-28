@@ -18,7 +18,7 @@ use parent qw(Mojo::WebSocketProxy::Backend);
 
 no indirect;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 __PACKAGE__->register_type('consumer_groups');
 
@@ -212,15 +212,26 @@ sub call_rpc {
     my $after_got_rpc_response_hooks  = delete($req_storage->{after_got_rpc_response})  || [];
     my $before_call_hooks             = delete($req_storage->{before_call})             || [];
     my $rpc_failure_cb                = delete($req_storage->{rpc_failure_cb});
+    my $rpc_timeout_extend_offset     = delete($req_storage->{rpc_timeout_extend_offset});
+    my $rpc_timeout_extend_percentage = delete($req_storage->{rpc_timeout_extend_percentage});
+
     # stream category which message should be assigned to
     $req_storage->{category} = $self->queue_separation_enabled && $req_storage->{category} ? $req_storage->{category} : DEFAULT_CATEGORY_NAME;
 
     foreach my $hook ($before_call_hooks->@*) { $hook->($c, $req_storage) }
 
+    my $category_deadline = $self->_rpc_category_timeout($req_storage->{category});
     my $category_timeout = $self->_rpc_category_timeout($req_storage->{category});
 
+    if ($rpc_timeout_extend_percentage) {
+        $category_timeout += $category_timeout * ($rpc_timeout_extend_percentage / 100);
+    }
+    if ($rpc_timeout_extend_offset) {
+        $category_timeout += $rpc_timeout_extend_offset;
+    }
+
     my $block_response = delete($req_storage->{block_response});
-    my ($msg_type, $request_data) = $self->_prepare_request_data($c, $req_storage, $category_timeout);
+    my ($msg_type, $request_data) = $self->_prepare_request_data($c, $req_storage, $category_deadline);
     $self->request($request_data, $req_storage->{category}, $category_timeout)->then(
         sub {
             my ($message) = @_;
@@ -415,34 +426,19 @@ sub _prepare_request_data {
 
     my $params       = $self->make_call_params($c, $req_storage);
     my $stash_params = $req_storage->{stash_params};
-    $req_log_context      = $req_storage->{logger}->get_context() if $req_storage->{logger};
+    $req_log_context = $req_storage->{logger}->get_context() if $req_storage->{logger};
 
     my $request_data = [
         rpc      => $method,
         who      => $self->whoami,
         deadline => time + $req_timeout,
 
-        $params          ? (args            => encode_json_utf8($params))         : (),
-        $stash_params    ? (stash           => encode_json_utf8($stash_params))   : (),
-        $req_log_context ? (req_log_context => encode_json_utf8($req_log_context)): (),
+        $params          ? (args            => encode_json_utf8($params))          : (),
+        $stash_params    ? (stash           => encode_json_utf8($stash_params))    : (),
+        $req_log_context ? (req_log_context => encode_json_utf8($req_log_context)) : (),
     ];
 
     return $msg_type, $request_data;
 }
 
 1;
-
-=head1 SEE ALSO
-
-L<Mojolicious::Plugin::WebSocketProxy>,
-L<Mojo::WebSocketProxy>
-L<Mojo::WebSocketProxy::Backend>,
-L<Mojo::WebSocketProxy::Dispatcher>,
-L<Mojo::WebSocketProxy::Config>
-L<Mojo::WebSocketProxy::Parser>
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright (C) 2022 deriv.com
-
-=cut
